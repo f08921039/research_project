@@ -2,6 +2,7 @@
 #include "ext_hash.h"
 
 #define NUM_OF_EH_SEG_ALLOC 7
+#define MAX_EH_SEG_ALLOC	(((1UL << 30) >> EH_TWO_SEGMENT_SIZE_BIT) - 1)
 
 struct tls_context tls_context_array[THREAD_NUM];
 
@@ -394,7 +395,7 @@ static int alloc_eh_two_segment_aligned(int seg2_num,
                         struct eh_segment **seg_addr, 
                         struct background_context *bg_context) {
     struct free_page_header *p_head;
-	void *addr = malloc_prefault_page_aligned((seg2_num + 1) << EH_TWO_SEGMENT_SIZE_BIT);
+	void *addr = malloc_prefault_page_aligned(((size_t)seg2_num + 1) << EH_TWO_SEGMENT_SIZE_BIT);
     size_t n;
 
 	if (unlikely(addr == MAP_FAILED))
@@ -443,10 +444,11 @@ static void prepare_enough_eh_segment(struct background_context *bg_context, int
         free_seg = free_seg->next;
     }
 
-    if (split_num > 0) {
+    while (split_num > 0) {
         struct eh_segment *seg_addr;
         struct free_page_header *new;
-        int ret = alloc_eh_two_segment_aligned(split_num, &seg_addr, bg_context);
+        int ret, alloc;
+        /*int ret = alloc_eh_two_segment_aligned(split_num, &seg_addr, bg_context);
 
         if (unlikely(!ret))
             return;
@@ -458,7 +460,27 @@ static void prepare_enough_eh_segment(struct background_context *bg_context, int
         if (last)
             last->next = new;
         else
+            bg_context->free_segment = new;*/
+            
+        alloc = ((split_num > MAX_EH_SEG_ALLOC) ? MAX_EH_SEG_ALLOC : split_num);
+            
+        ret = alloc_eh_two_segment_aligned(alloc, &seg_addr, bg_context);
+        	
+	if (unlikely(!ret))
+            return;
+            
+        split_num -= alloc;
+
+        new = (struct free_page_header *)seg_addr;
+        new->next = NULL;
+        new->size = ((size_t)ret) << EH_TWO_SEGMENT_SIZE_BIT;
+        
+        if (last)
+            last->next = new;
+        else
             bg_context->free_segment = new;
+            
+        last = new;
     }
 }
 
